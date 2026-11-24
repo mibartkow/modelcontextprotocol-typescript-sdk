@@ -11,7 +11,7 @@ const transport = new StdioClientTransport({
   command: process.execPath,
   args: ["--import", "tsx", "packages/docs-mcp/src/index.ts"],
   cwd: root,
-  env: { DOCS_ROOT: docsRoot },
+  env: { DOCS_ROOT: docsRoot, DOCS_SITEMAP_URL: "" },
   stderr: "pipe",
 });
 

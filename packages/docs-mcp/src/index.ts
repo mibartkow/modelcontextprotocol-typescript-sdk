@@ -7,7 +7,8 @@ async function main(): Promise<void> {
   const server = createDocsServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("docs-mcp listening on stdio");
+  const source = process.env.DOCS_SITEMAP_URL?.trim() ? "website" : "local Markdown";
+  console.error(`docs-mcp listening on stdio (source: ${source})`);
 }
 
 main().catch((error: unknown) => {

@@ -4,7 +4,7 @@ This fixture documents how to run the local MCP servers.
 
 ## Docs MCP
 
-Set `DOCS_ROOT` to this folder and use:
+With the bundled sample documents, try:
 
 - `list_docs`
 - `search_docs`
@@ -12,7 +12,7 @@ Set `DOCS_ROOT` to this folder and use:
 
 ## Next steps
 
-1. Connect Cursor via `.cursor/mcp.json`
+1. Connect your MCP client using stdio or Streamable HTTP
 2. Verify tools with MCP Inspector
 3. Add Jira / Confluence credentials in `.env`
 

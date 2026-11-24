@@ -57,5 +57,6 @@ app.get("/mcp", (_req: Request, res: Response) => {
 });
 
 app.listen(port, host, () => {
-  console.error(`docs-mcp Streamable HTTP on http://${host}:${port}/mcp`);
+  const source = process.env.DOCS_SITEMAP_URL?.trim() ? "website" : "local Markdown";
+  console.error(`docs-mcp Streamable HTTP on http://${host}:${port}/mcp (source: ${source})`);
 });

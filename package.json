@@ -19,6 +19,7 @@
     "inspect:confluence": "npx @modelcontextprotocol/inspector npm run confluence",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "smoke:docs": "node scripts/smoke-docs.mjs",
+    "smoke:docs:website": "node scripts/smoke-docs-website.mjs",
     "smoke:jira": "node scripts/smoke-jira-list.mjs"
   },
   "keywords": [

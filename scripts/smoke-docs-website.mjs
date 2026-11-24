@@ -65,7 +65,9 @@ try {
 
   const call = (name, args) => client.callTool({ name, arguments: args });
   const list = JSON.parse((await call("list_docs", { limit: 1 })).content[0].text);
+  const sourceUrl = `${origin}/handbuch/docs/intro`;
   assert.deepEqual(list.files, ["handbuch/docs/intro"]);
+  assert.deepEqual(list.sources, { "handbuch/docs/intro": sourceUrl });
   assert.equal(list.nextOffset, 1);
   assert.equal(list.total, 2);
   assert.equal(list.truncated, false);
@@ -75,13 +77,16 @@ try {
   assert.equal(search.count, 1);
   assert.equal(search.scanned, 1);
   assert.equal(search.partial, true);
-  assert.equal(search.matches[0].sourceUrl, `${origin}/handbuch/docs/intro`);
+  assert.equal(search.matches[0].sourceUrl, sourceUrl);
   assert.doesNotMatch(search.matches[0].snippet, /navigation only|footer only/);
 
   const read = await call("read_doc", { path: list.files[0], limit: 8 });
-  assert.equal(read.content[0].text, "Handbuch");
+  assert.equal(read.content[0].text, `Source: ${sourceUrl}\n\nHandbuch`);
   assert.equal(read.structuredContent.nextOffset, 8);
-  assert.equal(read.structuredContent.sourceUrl, search.matches[0].sourceUrl);
+  assert.equal(read.structuredContent.sourceUrl, sourceUrl);
+  const continuation = await call("read_doc", { path: list.files[0], offset: read.structuredContent.nextOffset });
+  assert.equal(continuation.content[0].text, `Source: ${sourceUrl}\n\n\n\nOnboarding für 👋 Teams.`);
+  assert.equal(continuation.structuredContent.nextOffset, null);
   assert.equal((await call("read_doc", { path: search.matches[0].sourceUrl })).isError, true);
   assert.ok(!requests.includes("/handbuch/blog/post"));
   assert.equal(requests.filter((url) => url === "/handbuch/docs/intro/").length, 1);

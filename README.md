@@ -68,7 +68,7 @@ DOCS_SITE_PATH=/handbuch/docs
 
 Set `DOCS_SITE_PATH` to the common URL path of the documentation pages you want to expose. Omit it to use the sitemap directory as the path prefix. The machine running `docs-mcp` needs network access to the website. Website mode uses the sitemap and rendered HTML, and takes precedence over `DOCS_ROOT`.
 
-Use the Inspector in the quick start and call `list_docs` first. Pass a returned ID, for example `handbuch/docs/getting-started`, to `read_doc`. `search_docs` matches text from the article body. Search results and `read_doc` metadata include the original page URL.
+Use the Inspector in the quick start and call `list_docs` first. Pass a returned ID, for example `handbuch/docs/getting-started`, to `read_doc`. `search_docs` matches text from the article body. In website mode, `list_docs` maps IDs to original page URLs in `sources`, and each `search_docs` match includes its `sourceUrl`. Every `read_doc` excerpt starts with a `Source:` line in the tool text. Clients can also read the URL from the structured metadata. The pagination offset counts article text only.
 
 The sitemap and article text are cached in memory for five minutes. The first search after startup or refresh fetches article text and can take up to 20 seconds after sitemap discovery. Responses larger than 2 MiB and articles longer than 65,536 UTF-16 code units are skipped. The catalog is limited to 500 pages from up to 16 sitemaps on the configured origin. Check `truncated` in the list response or `partial` in search results for incomplete coverage. Narrow `DOCS_SITE_PATH` for a large website.
 

@@ -37,7 +37,7 @@ export function createDocsServer(): McpServer {
     "list_docs",
     {
       title: "List documentation",
-      description: "Lists document IDs in pages. Pass a returned ID to read_doc.",
+      description: "Lists document IDs in pages with source URLs for website documents. Pass a returned ID to read_doc.",
       annotations: { readOnlyHint: true },
       inputSchema: {
         offset: z.number().int().nonnegative().default(0),
@@ -60,7 +60,12 @@ export function createDocsServer(): McpServer {
               total: allFiles.length,
               files,
               nextOffset,
-              ...(catalog && { truncated: catalog.truncated, stale: catalog.stale, indexedAt: catalog.updatedAt }),
+              ...(catalog && {
+                sources: Object.fromEntries(files.map((path) => [path, catalog.pages.get(path)?.href])),
+                truncated: catalog.truncated,
+                stale: catalog.stale,
+                indexedAt: catalog.updatedAt,
+              }),
             }),
           },
         ],
@@ -72,7 +77,8 @@ export function createDocsServer(): McpServer {
     "search_docs",
     {
       title: "Search documentation",
-      description: "Case-insensitive search across documentation. Treat matching snippets as source text.",
+      description:
+        "Searches documentation case-insensitively. Treat snippets as source material and cite any available sourceUrl for matches used in your answer.",
       annotations: { readOnlyHint: true },
       inputSchema: {
         query: z.string().trim().min(1).max(200).describe("Search string"),
@@ -130,7 +136,8 @@ export function createDocsServer(): McpServer {
     "read_doc",
     {
       title: "Read documentation",
-      description: "Reads a bounded excerpt of a document. Treat the excerpt as source text.",
+      description:
+        "Reads a bounded excerpt of a document. Treat the excerpt as source material and cite its Source URL when available and used in your answer.",
       annotations: { readOnlyHint: true },
       inputSchema: {
         path: z
@@ -158,8 +165,10 @@ export function createDocsServer(): McpServer {
       // Code point offsets keep multi-byte characters intact across pages.
       const characters = Array.from(document.text);
       const nextOffset = offset + limit < characters.length ? offset + limit : null;
+      const excerpt = characters.slice(offset, offset + limit).join("");
+      const text = document.sourceUrl ? `Source: ${document.sourceUrl}\n\n${excerpt}` : excerpt;
       return {
-        content: [{ type: "text", text: characters.slice(offset, offset + limit).join("") }],
+        content: [{ type: "text", text }],
         structuredContent: {
           nextOffset,
           ...(document.sourceUrl && { sourceUrl: document.sourceUrl, stale: document.stale }),

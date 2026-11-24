@@ -59,14 +59,14 @@ Example Atlassian calls after configuration:
 
 ### Read a Docusaurus website locally
 
-In your local `.env`, set the sitemap URL to your website:
+In the `.env` at the root of the checkout that runs `docs-mcp`, set the sitemap URL to your website:
 
 ```dotenv
 DOCS_SITEMAP_URL=https://docs.example/handbuch/sitemap.xml
 DOCS_SITE_PATH=/handbuch/docs
 ```
 
-Set `DOCS_SITE_PATH` to the common URL path of the documentation pages you want to expose. Omit it to use the sitemap directory as the path prefix. The machine running `docs-mcp` needs network access to the website. Website mode uses the sitemap and rendered HTML, and takes precedence over `DOCS_ROOT`.
+Set `DOCS_SITE_PATH` to the common URL path of the documentation pages you want to expose. Omit it to use the sitemap directory as the path prefix. The machine running `docs-mcp` needs network access to the website. Website mode uses the sitemap and rendered HTML, and takes precedence over `DOCS_ROOT`. The Docs server reads its checkout's `.env` even when an MCP client starts it from another project. A non-empty `DOCS_SITEMAP_URL` enables website mode. Restart the server after editing the file and check the startup log for `source: website`.
 
 Use the Inspector in the quick start and call `list_docs` first. Pass a returned ID, for example `handbuch/docs/getting-started`, to `read_doc`. `search_docs` matches text from the article body. In website mode, `list_docs` maps IDs to original page URLs in `sources`, and each `search_docs` match includes its `sourceUrl`. Every `read_doc` excerpt starts with a `Source:` line in the tool text. Clients can also read the URL from the structured metadata. The pagination offset counts article text only.
 

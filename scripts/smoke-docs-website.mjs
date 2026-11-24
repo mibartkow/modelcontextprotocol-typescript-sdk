@@ -49,8 +49,8 @@ const client = new Client({ name: "smoke-docs-website", version: "1.0.0" });
 
 try {
   await writeFile(path.join(cwd, ".env"), [
-    `DOCS_SITEMAP_URL=${origin}/handbuch/sitemap.xml`,
-    "DOCS_SITE_PATH=/handbuch/docs",
+    `DOCS_SITEMAP_URL=${origin}/unrelated/sitemap.xml`,
+    "DOCS_SITE_PATH=/unrelated",
   ].join("\n"));
   const transport = new StdioClientTransport({
     command: process.execPath,
@@ -60,6 +60,10 @@ try {
       path.join(root, "packages/docs-mcp/src/index.ts"),
     ],
     cwd,
+    env: {
+      DOCS_SITEMAP_URL: `${origin}/handbuch/sitemap.xml`,
+      DOCS_SITE_PATH: "/handbuch/docs",
+    },
   });
   await client.connect(transport);
 

@@ -1,0 +1,36 @@
+{
+  "name": "my-mcp",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Monorepo with separate MCP servers for Markdown docs, Jira, and Confluence",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "docs": "npm run start -w @my-mcp/docs-mcp",
+    "docs:http": "npm run start:http -w @my-mcp/docs-mcp",
+    "jira": "npm run start -w @my-mcp/jira-mcp",
+    "jira:http": "npm run start:http -w @my-mcp/jira-mcp",
+    "confluence": "npm run start -w @my-mcp/confluence-mcp",
+    "confluence:http": "npm run start:http -w @my-mcp/confluence-mcp",
+    "inspect:docs": "npx @modelcontextprotocol/inspector npm run docs",
+    "inspect:jira": "npx @modelcontextprotocol/inspector npm run jira",
+    "inspect:confluence": "npx @modelcontextprotocol/inspector npm run confluence",
+    "typecheck": "npm run typecheck --workspaces --if-present",
+    "smoke:docs": "node scripts/smoke-docs.mjs",
+    "smoke:jira": "node scripts/smoke-jira-list.mjs"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol"
+  ],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/express": "^5.0.3",
+    "@types/node": "22.19.0",
+    "tsx": "4.20.6",
+    "typescript": "5.9.3"
+  }
+}

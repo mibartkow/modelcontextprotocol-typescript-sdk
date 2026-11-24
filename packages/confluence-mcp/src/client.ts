@@ -52,6 +52,10 @@ export async function confluenceFetch(
 
   const response = await fetch(url, {
     ...init,
+    redirect: "error",
+    signal: init?.signal
+      ? AbortSignal.any([init.signal, AbortSignal.timeout(10_000)])
+      : AbortSignal.timeout(10_000),
     headers: {
       Accept: "application/json",
       "Content-Type": "application/json",
@@ -60,19 +64,14 @@ export async function confluenceFetch(
     },
   });
 
-  const text = await response.text();
-  let body: unknown = text;
-  try {
-    body = text ? JSON.parse(text) : null;
-  } catch {
-    // keep raw text
-  }
-
   if (!response.ok) {
-    throw new Error(
-      `Confluence API ${response.status} ${response.statusText}: ${typeof body === "string" ? body : JSON.stringify(body)}`,
-    );
+    await response.body?.cancel();
+    throw new Error(`Confluence API request failed (HTTP ${response.status}).`);
   }
 
-  return body;
+  try {
+    return await response.json();
+  } catch {
+    throw new Error("Confluence API returned an unreadable JSON response.");
+  }
 }

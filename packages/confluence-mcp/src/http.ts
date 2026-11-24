@@ -8,7 +8,21 @@ import { createConfluenceServer } from "./server.js";
 loadEnvFile();
 const port = Number(process.env.CONFLUENCE_HTTP_PORT ?? 3103);
 
-const app = createMcpExpressApp();
+const host = "127.0.0.1";
+const localOrigins = new Set([`http://${host}:${port}`, `http://localhost:${port}`]);
+const app = createMcpExpressApp({ host });
+
+app.use((req, res, next) => {
+  const origin = req.get("Origin");
+  if (origin !== undefined && !localOrigins.has(origin)) {
+    res.status(403).json({
+      jsonrpc: "2.0",
+      error: { code: -32000, message: "Origin not allowed" },
+    });
+    return;
+  }
+  next();
+});
 
 app.post("/mcp", async (req: Request, res: Response) => {
   const server = createConfluenceServer();
@@ -19,10 +33,6 @@ app.post("/mcp", async (req: Request, res: Response) => {
     const transport = new StreamableHTTPServerTransport(options);
     await server.connect(transport);
     await transport.handleRequest(req, res, req.body);
-    res.on("close", () => {
-      void transport.close();
-      void server.close();
-    });
   } catch (error) {
     console.error("confluence-mcp HTTP error:", error);
     if (!res.headersSent) {
@@ -32,6 +42,8 @@ app.post("/mcp", async (req: Request, res: Response) => {
         id: null,
       });
     }
+  } finally {
+    await server.close();
   }
 });
 
@@ -43,6 +55,6 @@ app.get("/mcp", (_req: Request, res: Response) => {
   });
 });
 
-app.listen(port, () => {
-  console.error(`confluence-mcp Streamable HTTP on http://127.0.0.1:${port}/mcp`);
+app.listen(port, host, () => {
+  console.error(`confluence-mcp Streamable HTTP on http://${host}:${port}/mcp`);
 });

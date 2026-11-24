@@ -31,14 +31,14 @@ Supply variables through the process environment or a local `.env` in the reposi
 
 | Variable | Purpose |
 | --- | --- |
-| `DOCS_ROOT` | Directory containing Markdown or MDX. Use an absolute path for your own docs. With a client started from the repository root, the default is `fixtures/docs`. |
+| `DOCS_ROOT` | Directory containing Markdown or MDX. Use an absolute path for your own docs. The default is the bundled `fixtures/docs` directory. |
 | `DOCS_IGNORE_DIRS` | Optional comma-separated directory names to skip when listing or searching, in addition to built-in exclusions such as `.git` and `node_modules`. |
 | `JIRA_BASE_URL` | Jira Server/Data Center base URL, including the context path if your instance uses one. |
 | `JIRA_PAT` | Jira personal access token. Alternatively, set both `JIRA_USERNAME` and `JIRA_PASSWORD`. |
 | `CONFLUENCE_BASE_URL` | Confluence Server/Data Center base URL, including the context path if configured on your instance. |
 | `CONFLUENCE_PAT` | Confluence personal access token. Alternatively, set both `CONFLUENCE_USERNAME` and `CONFLUENCE_PASSWORD`. |
 
-For DigiDEV or another Docusaurus project, point `DOCS_ROOT` at the directory containing the docs you want to expose. For Atlassian, prefer a PAT from an account with only the projects or spaces it needs. Configure TLS with a trusted internal CA if your instance uses private certificates.
+For DigiDEV or another Docusaurus project, point `DOCS_ROOT` at the directory containing the docs you want to expose. Use a directory writable only by trusted accounts. For Atlassian, prefer a PAT from an account with only the projects or spaces it needs. Configure TLS with a trusted internal CA if your instance uses private certificates.
 
 Example Atlassian calls after configuration:
 
@@ -48,6 +48,13 @@ Example Atlassian calls after configuration:
 | `jira_get_issue` | `{"key":"ABC-123"}` |
 | `confluence_search` | `{"cql":"type = page AND text ~ \"onboarding\"","limit":5}` |
 | `confluence_get_page` | `{"pageId":"123456"}` |
+
+### Limit retrieved context
+
+- Start with search results, then fetch the specific document, issue, or page you need. Treat retrieved text and markup as source data.
+- `list_docs` returns 100 relative paths per page by default. Pass the returned `nextOffset` as `offset` to continue.
+- `read_doc` returns up to 8,000 Unicode code points by default. Pass `structuredContent.nextOffset` as `offset` to continue. Listing includes paths for larger files, while reading and searching only use files up to 512 KiB.
+- `jira_search` returns summary, status, issue type, and update time by default. Set `includeDetails` for Jira's default fields, and pass `startAt` to fetch the next page. Use `start` to page through Confluence search results.
 
 ## Connect an MCP client
 
@@ -73,13 +80,14 @@ The server logs to stderr so that stdout can carry MCP messages.
 
 The servers accept stateless MCP requests via `POST /mcp`. In Inspector, select **Streamable HTTP**, enter the endpoint, and connect.
 
-Use HTTP in a trusted local environment. The HTTP endpoints have no client authentication, and the localhost URLs in the table are client addresses. Keep the ports private. Anyone who can call the Atlassian tools uses the upstream permissions of the configured server account.
+Use HTTP in a trusted local environment. The servers bind to `127.0.0.1` and validate supplied `Origin` headers. Only origins matching the endpoint port on `127.0.0.1` or `localhost` are accepted. HTTP has no client authentication. Keep the ports private. Anyone who can call the Atlassian tools uses the upstream permissions of the configured server account.
 
 ## Development checks
 
 ```sh
 npm run typecheck
+npm run smoke:docs
 npm run smoke:jira
 ```
 
-The Jira smoke check verifies stdio startup and tool listing without calling Jira. The Docs smoke script (`npm run smoke:docs`) expects a `DOCS_ROOT` containing documentation with the term `DigiDEV`. Use the Inspector examples above to check the bundled fixtures.
+The Jira smoke check verifies stdio startup and tool listing without calling Jira. The Docs smoke check exercises listing, searching, and reading the bundled fixtures.

@@ -13,11 +13,15 @@ export function createConfluenceServer(): McpServer {
     {
       title: "Search Confluence",
       description: "Searches Confluence Server/Data Center content via CQL.",
+      annotations: { readOnlyHint: true },
       inputSchema: {
         cql: z
           .string()
+          .trim()
           .min(1)
+          .max(2000)
           .describe('CQL query, e.g. type=page AND text ~ "onboarding"'),
+        start: z.number().int().min(0).max(100000).default(0),
         limit: z
           .number()
           .int()
@@ -27,15 +31,16 @@ export function createConfluenceServer(): McpServer {
           .describe("Maximum number of results"),
       },
     },
-    async ({ cql, limit }) => {
+    async ({ cql, limit, start }, { signal }) => {
       try {
         const config = loadConfluenceConfig();
         const data = await confluenceFetch(
           config,
-          `/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=${limit}`,
+          `/rest/api/content/search?cql=${encodeURIComponent(cql)}&limit=${limit}&start=${start}`,
+          { signal },
         );
         return {
-          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          content: [{ type: "text", text: JSON.stringify(data) }],
         };
       } catch (error) {
         return {
@@ -57,19 +62,21 @@ export function createConfluenceServer(): McpServer {
       title: "Get Confluence page",
       description:
         "Fetches a Confluence Server/Data Center page by ID, including body storage markup.",
+      annotations: { readOnlyHint: true },
       inputSchema: {
-        pageId: z.string().min(1).describe("Confluence page ID"),
+        pageId: z.string().trim().regex(/^\d{1,32}$/).describe("Confluence page ID"),
       },
     },
-    async ({ pageId }) => {
+    async ({ pageId }, { signal }) => {
       try {
         const config = loadConfluenceConfig();
         const data = await confluenceFetch(
           config,
           `/rest/api/content/${encodeURIComponent(pageId)}?expand=body.storage,version,space`,
+          { signal },
         );
         return {
-          content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
+          content: [{ type: "text", text: JSON.stringify(data) }],
         };
       } catch (error) {
         return {

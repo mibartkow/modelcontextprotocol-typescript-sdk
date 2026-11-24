@@ -4,9 +4,9 @@ This TypeScript monorepo provides three independent, read-only [Model Context Pr
 
 | Server | Data source | Tools |
 | --- | --- | --- |
-| [`docs-mcp`](packages/docs-mcp) | Local Markdown/MDX or a Docusaurus website | `list_docs`, `search_docs`, `read_doc` |
-| [`jira-mcp`](packages/jira-mcp) | Jira Server/Data Center REST API v2 | `jira_search`, `jira_get_issue` |
-| [`confluence-mcp`](packages/confluence-mcp) | Confluence Server/Data Center REST API | `confluence_search`, `confluence_get_page` |
+| `docs-mcp` | Local Markdown/MDX or a Docusaurus website | `list_docs`, `search_docs`, `read_doc` |
+| `jira-mcp` | Jira Server/Data Center REST API v2 | `jira_search`, `jira_get_issue` |
+| `confluence-mcp` | Confluence Server/Data Center REST API | `confluence_search`, `confluence_get_page` |
 
 ## Quick start
 
@@ -17,7 +17,7 @@ npm ci
 npx @modelcontextprotocol/inspector --cli --method tools/list -- node --import tsx packages/docs-mcp/src/index.ts
 ```
 
-The repository includes [sample documents](fixtures/docs), so this works without Atlassian credentials. To try a tool interactively, start `npx @modelcontextprotocol/inspector` and use the Docs stdio settings below.
+The repository includes sample documents, so this works without Atlassian credentials. To try a tool interactively, start `npx @modelcontextprotocol/inspector` and use the Docs stdio settings below.
 
 | Tool | Example arguments |
 | --- | --- |
@@ -27,13 +27,19 @@ The repository includes [sample documents](fixtures/docs), so this works without
 
 ## Configuration
 
-Supply variables through the process environment or a local `.env` in the repository root. Process environment variables take precedence. Keep credential files outside version control.
+Copy `.env.example` to `.env` from the repository root, then fill in the settings for the servers you use. Process environment variables take precedence. Keep credentials in the ignored `.env` file.
+
+```powershell
+Copy-Item .env.example .env
+```
+
+On macOS or Linux, use `cp .env.example .env`.
 
 | Variable | Purpose |
 | --- | --- |
 | `DOCS_SITEMAP_URL` | Absolute URL of a Docusaurus sitemap. Enables website mode when set. |
 | `DOCS_SITE_PATH` | Optional website path prefix such as `/handbuch/docs`. Defaults to the sitemap URL’s directory. |
-| `DOCS_ROOT` | Directory containing Markdown or MDX. Use an absolute path for your own docs. The default is the bundled `fixtures/docs` directory. |
+| `DOCS_ROOT` | Directory containing Markdown or MDX, configured locally. Leave blank to use the bundled sample documents. |
 | `DOCS_IGNORE_DIRS` | Optional comma-separated directory names to skip when listing or searching, in addition to built-in exclusions such as `.git` and `node_modules`. |
 | `JIRA_BASE_URL` | Jira Server/Data Center base URL, including the context path if your instance uses one. |
 | `JIRA_PAT` | Jira personal access token. Alternatively, set both `JIRA_USERNAME` and `JIRA_PASSWORD`. |
@@ -53,10 +59,10 @@ Example Atlassian calls after configuration:
 
 ### Read a Docusaurus website locally
 
-From the repository root, create a `.env` file and set the sitemap URL to your website:
+In your local `.env`, set the sitemap URL to your website:
 
 ```dotenv
-DOCS_SITEMAP_URL=https://intranet.example.org/handbuch/sitemap.xml
+DOCS_SITEMAP_URL=https://docs.example/handbuch/sitemap.xml
 DOCS_SITE_PATH=/handbuch/docs
 ```
 
@@ -77,7 +83,7 @@ The sitemap and article text are cached in memory for five minutes. The first se
 
 ### stdio
 
-Set the client's working directory to the repository root. Use `node` as the command and the arguments shown below. For clients such as Cursor that start processes from another directory, use an absolute path to the entry point and set configuration through the client environment. In that case, pass the repository's absolute `node_modules/tsx/dist/loader.mjs` path to `--import` and set `DOCS_ROOT` explicitly for Docs.
+Set the client's working directory to the repository root. Use `node` as the command and the arguments shown below. If the client cannot set the working directory, use Streamable HTTP below.
 
 | Server | Arguments |
 | --- | --- |

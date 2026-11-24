@@ -1,105 +1,85 @@
-# my-mcp
+# MCP servers for Markdown, Jira, and Confluence
 
-Monorepo with three separate Model Context Protocol servers (TypeScript SDK):
+This TypeScript monorepo provides three independent, read-only [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers. Connect them to an MCP client to retrieve local documentation or look up content in Jira and Confluence Server/Data Center.
 
-| Server | Package | Transport | Purpose |
-|--------|---------|-----------|---------|
-| `docs-mcp` | `packages/docs-mcp` | stdio / HTTP | DigiDEV Docusaurus (`.md`/`.mdx` under `DOCS_ROOT`) |
-| `jira-mcp` | `packages/jira-mcp` | stdio / HTTP | Jira issues via REST |
-| `confluence-mcp` | `packages/confluence-mcp` | stdio / HTTP | Confluence pages via REST |
+| Server | Data source | Tools |
+| --- | --- | --- |
+| [`docs-mcp`](packages/docs-mcp) | Markdown and MDX under `DOCS_ROOT` | `list_docs`, `search_docs`, `read_doc` |
+| [`jira-mcp`](packages/jira-mcp) | Jira Server/Data Center REST API v2 | `jira_search`, `jira_get_issue` |
+| [`confluence-mcp`](packages/confluence-mcp) | Confluence Server/Data Center REST API | `confluence_search`, `confluence_get_page` |
 
-## Prerequisites
+## Quick start
 
-- Node.js 18+
-- **Atlassian Server / Data Center** (not Cloud) with REST access
-- Auth: Personal Access Token (preferred) or username + password
+Use Node.js 24 LTS (at least 24.22.1 on the Node 24 release line for the current MCP Inspector) and npm. Run these commands from the repository root:
 
-## Setup
-
-```bash
-npm install
-cp .env.example .env
-# edit .env with your Server/DC base URLs and PAT (or username/password)
+```sh
+npm ci
+npx @modelcontextprotocol/inspector --cli --method tools/list -- node --import tsx packages/docs-mcp/src/index.ts
 ```
 
-## Local testing (stdio)
+The repository includes [sample documents](fixtures/docs), so this works without Atlassian credentials. To try a tool interactively, start `npx @modelcontextprotocol/inspector` and use the Docs stdio settings below.
 
-### MCP Inspector
+| Tool | Example arguments |
+| --- | --- |
+| `list_docs` | `{}` |
+| `search_docs` | `{"query":"onboarding","limit":5}` |
+| `read_doc` | `{"path":"guides/onboarding.md"}` |
 
-```bash
-npm run inspect:docs
-# npm run inspect:jira
-# npm run inspect:confluence
+## Configuration
+
+Supply variables through the process environment or a local `.env` in the repository root. Process environment variables take precedence. Keep credential files outside version control.
+
+| Variable | Purpose |
+| --- | --- |
+| `DOCS_ROOT` | Directory containing Markdown or MDX. Use an absolute path for your own docs. With a client started from the repository root, the default is `fixtures/docs`. |
+| `DOCS_IGNORE_DIRS` | Optional comma-separated directory names to skip when listing or searching, in addition to built-in exclusions such as `.git` and `node_modules`. |
+| `JIRA_BASE_URL` | Jira Server/Data Center base URL, including the context path if your instance uses one. |
+| `JIRA_PAT` | Jira personal access token. Alternatively, set both `JIRA_USERNAME` and `JIRA_PASSWORD`. |
+| `CONFLUENCE_BASE_URL` | Confluence Server/Data Center base URL, including the context path if configured on your instance. |
+| `CONFLUENCE_PAT` | Confluence personal access token. Alternatively, set both `CONFLUENCE_USERNAME` and `CONFLUENCE_PASSWORD`. |
+
+For DigiDEV or another Docusaurus project, point `DOCS_ROOT` at the directory containing the docs you want to expose. For Atlassian, prefer a PAT from an account with only the projects or spaces it needs. Configure TLS with a trusted internal CA if your instance uses private certificates.
+
+Example Atlassian calls after configuration:
+
+| Tool | Example arguments |
+| --- | --- |
+| `jira_search` | `{"jql":"project = ABC ORDER BY updated DESC","maxResults":5}` |
+| `jira_get_issue` | `{"key":"ABC-123"}` |
+| `confluence_search` | `{"cql":"type = page AND text ~ \"onboarding\"","limit":5}` |
+| `confluence_get_page` | `{"pageId":"123456"}` |
+
+## Connect an MCP client
+
+### stdio
+
+Set the client's working directory to the repository root. Use `node` as the command and the arguments shown below. For clients such as Cursor that start processes from another directory, use an absolute path to the entry point and set configuration through the client environment. In that case, pass the repository's absolute `node_modules/tsx/dist/loader.mjs` path to `--import` and set `DOCS_ROOT` explicitly for Docs.
+
+| Server | Arguments |
+| --- | --- |
+| Docs | `--import tsx packages/docs-mcp/src/index.ts` |
+| Jira | `--import tsx packages/jira-mcp/src/index.ts` |
+| Confluence | `--import tsx packages/confluence-mcp/src/index.ts` |
+
+The server logs to stderr so that stdout can carry MCP messages.
+
+### Streamable HTTP
+
+| Server | Start command | Default endpoint | Port override |
+| --- | --- | --- | --- |
+| Docs | `npm run docs:http` | `http://127.0.0.1:3101/mcp` | `DOCS_HTTP_PORT` |
+| Jira | `npm run jira:http` | `http://127.0.0.1:3102/mcp` | `JIRA_HTTP_PORT` |
+| Confluence | `npm run confluence:http` | `http://127.0.0.1:3103/mcp` | `CONFLUENCE_HTTP_PORT` |
+
+The servers accept stateless MCP requests via `POST /mcp`. In Inspector, select **Streamable HTTP**, enter the endpoint, and connect.
+
+Use HTTP in a trusted local environment. The HTTP endpoints have no client authentication, and the localhost URLs in the table are client addresses. Keep the ports private. Anyone who can call the Atlassian tools uses the upstream permissions of the configured server account.
+
+## Development checks
+
+```sh
+npm run typecheck
+npm run smoke:jira
 ```
 
-In the Inspector UI: list tools, then call e.g. `list_docs` / `search_docs` / `read_doc`.
-
-For docs, `DOCS_ROOT` should point at the DigiDEV Docusaurus repo (see `.env.example`):
-
-```bash
-# PowerShell
-$env:DOCS_ROOT = "C:\Users\BartkowiakMirko\IdeaProjects\digidev-docusaurs"
-npm run inspect:docs
-```
-
-### Cursor
-
-Project config: [`.cursor/mcp.json`](.cursor/mcp.json). Reload MCP servers in Cursor after install. Ensure workspace env / `.env` values are available for Jira and Confluence.
-
-### Manual stdio start
-
-```bash
-$env:DOCS_ROOT = "C:\Users\BartkowiakMirko\IdeaProjects\digidev-docusaurs"
-npm run docs
-```
-
-Logs go to **stderr** only (stdout is reserved for MCP JSON-RPC).
-
-## Streamable HTTP (multi-agent)
-
-Same tools, remote-friendly transport:
-
-```bash
-npm run docs:http        # http://127.0.0.1:3101/mcp
-npm run jira:http        # http://127.0.0.1:3102/mcp
-npm run confluence:http  # http://127.0.0.1:3103/mcp
-```
-
-Inspector against HTTP:
-
-```bash
-npx @modelcontextprotocol/inspector --server-url http://127.0.0.1:3101/mcp --transport http
-```
-
-## Tools
-
-### docs-mcp
-
-Default `DOCS_ROOT`: DigiDEV Docusaurus (`digidev-docusaurs`). Indexes `.md`/`.mdx`, skips `node_modules`, `.git`, `.docusaurus`, …
-
-- `list_docs` — list doc files under `DOCS_ROOT`
-- `search_docs` — case-insensitive content search
-- `read_doc` — read one relative path (path-traversal protected)
-
-### jira-mcp (Server/DC, REST API v2)
-
-- `jira_search` — JQL search via `/rest/api/2/search`
-- `jira_get_issue` — issue by key via `/rest/api/2/issue/{key}`
-
-Env: `JIRA_BASE_URL`, plus `JIRA_PAT` **or** `JIRA_USERNAME` + `JIRA_PASSWORD`
-
-### confluence-mcp (Server/DC)
-
-- `confluence_search` — CQL search
-- `confluence_get_page` — page by ID (`body.storage` expanded)
-
-Env: `CONFLUENCE_BASE_URL` (Server-Host, **ohne** `/wiki`), plus `CONFLUENCE_PAT` **or** `CONFLUENCE_USERNAME` + `CONFLUENCE_PASSWORD`
-
-Self-signed TLS nur zum Dev-Test: `NODE_TLS_REJECT_UNAUTHORIZED=0` (siehe `.env.example`).
-
-## Recommended order
-
-1. Verify **docs-mcp** against DigiDEV Docusaurus + Inspector (no Atlassian credentials)
-2. Wire Cursor `mcp.json`
-3. Server/DC-URLs + PAT in `.env` setzen und **jira-mcp** / **confluence-mcp** testen
-4. Use `*:http` when multiple agents need the same server process
+The Jira smoke check verifies stdio startup and tool listing without calling Jira. The Docs smoke script (`npm run smoke:docs`) expects a `DOCS_ROOT` containing documentation with the term `DigiDEV`. Use the Inspector examples above to check the bundled fixtures.

@@ -28,10 +28,17 @@ export function createDocsServer(): McpServer {
   const website = sitemap
     ? (websiteDocs ??= new WebsiteDocs(sitemap, process.env.DOCS_SITE_PATH?.trim()))
     : undefined;
-  const server = new McpServer({
-    name: "docs-mcp",
-    version: "1.0.0",
-  });
+  const server = new McpServer(
+    {
+      name: "docs-mcp",
+      version: "1.0.0",
+    },
+    {
+      instructions: website
+        ? "Use search_docs for DigiDEV questions. Prefer returned HTTPS sourceUrl matches. Do not confuse DigiDEV APIs with Vitest or other npm packages."
+        : "Documentation comes from local Markdown/MDX files under DOCS_ROOT.",
+    },
+  );
 
   server.registerTool(
     "list_docs",
@@ -51,17 +58,20 @@ export function createDocsServer(): McpServer {
       const nextOffset = offset + files.length < allFiles.length
         ? offset + files.length
         : null;
+      const documents = files.map((path) => ({
+        path,
+        ...(catalog?.pages.get(path)?.href && { sourceUrl: catalog.pages.get(path)!.href }),
+      }));
       return {
         content: [
           {
             type: "text",
             text: JSON.stringify({
-              count: files.length,
+              count: documents.length,
               total: allFiles.length,
-              files,
+              documents,
               nextOffset,
               ...(catalog && {
-                sources: Object.fromEntries(files.map((path) => [path, catalog.pages.get(path)?.href])),
                 truncated: catalog.truncated,
                 stale: catalog.stale,
                 indexedAt: catalog.updatedAt,
@@ -76,9 +86,9 @@ export function createDocsServer(): McpServer {
   server.registerTool(
     "search_docs",
     {
-      title: "Search documentation",
+      title: "Search DigiDEV documentation",
       description:
-        "Searches documentation case-insensitively. Treat snippets as source material and cite any available sourceUrl for matches used in your answer.",
+        "Searches DigiDEV docs case-insensitively and returns HTTPS sourceUrl matches. Use these results for DigiDEV API/module questions; do not fall back to Vitest or node_modules.",
       annotations: { readOnlyHint: true },
       inputSchema: {
         query: z.string().trim().min(1).max(200).describe("Search string"),
@@ -92,22 +102,39 @@ export function createDocsServer(): McpServer {
       },
     },
     async ({ query, limit }) => {
-      const catalog = await website?.getCatalog();
-      const indexResult = website && catalog ? await website.searchIndex(catalog) : undefined;
-      const documents: Iterable<{ path: string; text: string; sourceUrl?: string }> =
-        indexResult?.documents ?? localDocuments();
+      if (website) {
+        const result = await website.search(query, limit);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                query,
+                count: result.matches.length,
+                matches: result.matches,
+                scanned: result.scanned,
+                total: result.total,
+                partial: result.partial,
+                stale: result.stale,
+              }),
+            },
+          ],
+        };
+      }
+
       const needle = query.toLowerCase();
-      const matches: Array<{ path: string; snippet: string; sourceUrl?: string }> = [];
-
-      for (const { path, text: content, sourceUrl } of documents) {
-        const lower = content.toLowerCase();
-        const index = lower.indexOf(needle);
+      const matches: Array<{ path: string; snippet: string }> = [];
+      let scanned = 0;
+      for (const { path, text: content } of localDocuments()) {
+        scanned += 1;
+        const index = content.toLowerCase().indexOf(needle);
         if (index === -1) continue;
-
         const start = Math.max(0, index - 40);
         const end = Math.min(content.length, index + query.length + 40);
-        const snippet = content.slice(start, end).replace(/\s+/g, " ").trim();
-        matches.push({ path, snippet, ...(sourceUrl && { sourceUrl }) });
+        matches.push({
+          path,
+          snippet: content.slice(start, end).replace(/\s+/g, " ").trim(),
+        });
         if (matches.length === limit) break;
       }
 
@@ -119,12 +146,7 @@ export function createDocsServer(): McpServer {
               query,
               count: matches.length,
               matches,
-              ...(catalog && indexResult && {
-                scanned: indexResult.scanned,
-                total: catalog.pages.size,
-                partial: indexResult.partial,
-                stale: catalog.stale,
-              }),
+              scanned,
             }),
           },
         ],

@@ -7,12 +7,22 @@ const MAX_SITEMAPS = 16;
 const MAX_PAGES = 500;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
 const MAX_TEXT_LENGTH = 65_536;
-const PAGE_CONCURRENCY = 6;
+const PAGE_CONCURRENCY = 12;
+const SEARCH_BUDGET_MS = 120_000;
+const PAGE_FETCH_MS = 8_000;
 
-interface SearchIndex {
-  documents: Array<{ path: string; text: string; sourceUrl: string }>;
+export interface SearchMatch {
+  path: string;
+  sourceUrl: string;
+  snippet: string;
+}
+
+export interface SearchResult {
+  matches: SearchMatch[];
   scanned: number;
+  total: number;
   partial: boolean;
+  stale: boolean;
 }
 
 interface Catalog {
@@ -22,7 +32,6 @@ interface Catalog {
   truncated: boolean;
   stale: boolean;
   expiresAt: number;
-  searchIndex?: Promise<SearchIndex>;
 }
 
 function parseUrl(value: string, base?: URL): URL | undefined {
@@ -96,7 +105,27 @@ async function fetchText(
     if ([301, 302, 303, 307, 308].includes(response.status)) {
       await response.body?.cancel();
       const location = response.headers.get("location");
-      const next = location && parseUrl(location, url);
+      if (!location) throw new Error("Invalid documentation redirect.");
+      // parseUrl alone is not enough: sites may redirect https → http on the same host.
+      let next: URL | undefined;
+      try {
+        next = new URL(location, url);
+        if (
+          next.protocol === "http:" &&
+          url.protocol === "https:" &&
+          next.hostname === url.hostname
+        ) {
+          next = new URL(next.href.replace(/^http:/i, "https:"));
+        }
+        if (
+          (next.protocol !== "https:" && next.protocol !== "http:") ||
+          next.username || next.password || next.search || next.hash
+        ) {
+          next = undefined;
+        }
+      } catch {
+        next = undefined;
+      }
       if (!next) throw new Error("Invalid documentation redirect.");
       url = next;
       continue;
@@ -143,6 +172,32 @@ function articleText(html: string): string {
   return text;
 }
 
+function queryTokens(query: string): string[] {
+  const lowered = query.toLowerCase();
+  const basic = lowered.split(/[^a-z0-9äöüß]+/i).filter((token) => token.length > 2);
+  const camel = query
+    .replace(/([a-zäöüß])([A-ZÄÖÜ])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z0-9äöüß]+/i)
+    .filter((token) => token.length > 2);
+  return [...new Set([...basic, ...camel, lowered].filter((token) => token.length > 1))];
+}
+
+function pathScore(path: string, tokens: string[]): number {
+  const haystack = path.toLowerCase();
+  let score = 0;
+  for (const token of tokens) {
+    if (haystack.includes(token)) score += token.length >= 4 ? 5 : 2;
+  }
+  return score;
+}
+
+function snippetAround(content: string, index: number, queryLength: number): string {
+  const start = Math.max(0, index - 40);
+  const end = Math.min(content.length, index + queryLength + 40);
+  return content.slice(start, end).replace(/\s+/g, " ").trim();
+}
+
 export class WebsiteDocs {
   private readonly sitemapUrl: URL;
   private readonly pathPrefix: string;
@@ -162,11 +217,16 @@ export class WebsiteDocs {
     this.pathPrefix = prefix.replace(/\/+$/, "");
   }
 
-  private sameOrigin = (url: URL): boolean => url.origin === this.sitemapUrl.origin;
+  /** Same host; allow http↔https redirects that internal Materna sites often emit. */
+  private sameSite = (url: URL): boolean =>
+    url.hostname === this.sitemapUrl.hostname &&
+    (url.protocol === "https:" || url.protocol === "http:");
 
-  private allowedPage = (url: URL): boolean =>
-    this.sameOrigin(url) &&
-    (url.pathname === this.pathPrefix || url.pathname.startsWith(`${this.pathPrefix}/`));
+  private allowedPage = (url: URL): boolean => {
+    if (!this.sameSite(url)) return false;
+    const pathname = url.pathname.replace(/\/+$/, "") || "/";
+    return pathname === this.pathPrefix || pathname.startsWith(`${this.pathPrefix}/`);
+  };
 
   private async loadCatalog(): Promise<Catalog> {
     const pending = [this.sitemapUrl];
@@ -176,10 +236,10 @@ export class WebsiteDocs {
     let truncated = false;
 
     for (const url of pending) {
-      const { isIndex, locations } = parseSitemap(await fetchText(url, this.sameOrigin, signal, "application/xml, text/xml"));
+      const { isIndex, locations } = parseSitemap(await fetchText(url, this.sameSite, signal, "application/xml, text/xml"));
       for (const location of locations) {
         const target = location && parseUrl(location, url);
-        if (!target || !this.sameOrigin(target)) continue;
+        if (!target || !this.sameSite(target)) continue;
         if (isIndex) {
           if (seen.has(target.href)) continue;
           if (seen.size === MAX_SITEMAPS) {
@@ -228,7 +288,8 @@ export class WebsiteDocs {
   private async getPage(catalog: Catalog, path: string, url: URL, signal: AbortSignal): Promise<string> {
     const cached = catalog.texts.get(path);
     if (cached !== undefined) return cached;
-    const text = articleText(await fetchText(url, this.allowedPage, signal, "text/html"));
+    const pageSignal = AbortSignal.any([signal, AbortSignal.timeout(PAGE_FETCH_MS)]);
+    const text = articleText(await fetchText(url, this.allowedPage, pageSignal, "text/html"));
     catalog.texts.set(path, text);
     return text;
   }
@@ -237,33 +298,56 @@ export class WebsiteDocs {
     const catalog = await this.getCatalog();
     const url = catalog.pages.get(path);
     if (!url) throw new Error("Unknown document ID. Use list_docs or search_docs.");
-    const text = await this.getPage(catalog, path, url, AbortSignal.timeout(5_000));
+    const text = await this.getPage(catalog, path, url, AbortSignal.timeout(PAGE_FETCH_MS));
     return { text, sourceUrl: url.href, stale: catalog.stale };
   }
 
-  async searchIndex(catalog: Catalog): Promise<SearchIndex> {
-    catalog.searchIndex ??= this.buildIndex(catalog);
-    return catalog.searchIndex;
-  }
+  /**
+   * Streams page fetches, prioritizes URL paths matching query tokens, and
+   * returns as soon as enough content matches are found (no full-site index).
+   */
+  async search(query: string, limit: number): Promise<SearchResult> {
+    const catalog = await this.getCatalog();
+    const needle = query.toLowerCase();
+    const tokens = queryTokens(query);
+    const pages = [...catalog.pages].sort(
+      ([left], [right]) => pathScore(right, tokens) - pathScore(left, tokens),
+    );
 
-  private async buildIndex(catalog: Catalog): Promise<SearchIndex> {
-    const pages = [...catalog.pages];
-    const signal = AbortSignal.timeout(20_000);
-    for (let start = 0; start < pages.length && !signal.aborted; start += PAGE_CONCURRENCY) {
-      await Promise.allSettled(pages.slice(start, start + PAGE_CONCURRENCY).map(
-        ([path, url]) => this.getPage(catalog, path, url, signal),
-      ));
+    const matches: SearchMatch[] = [];
+    let scanned = 0;
+    const budget = AbortSignal.timeout(SEARCH_BUDGET_MS);
+
+    for (let start = 0; start < pages.length && !budget.aborted && matches.length < limit; start += PAGE_CONCURRENCY) {
+      const batch = pages.slice(start, start + PAGE_CONCURRENCY);
+      const settled = await Promise.allSettled(
+        batch.map(async ([path, url]) => {
+          const text = await this.getPage(catalog, path, url, budget);
+          return { path, url, text };
+        }),
+      );
+
+      for (const result of settled) {
+        if (result.status !== "fulfilled") continue;
+        scanned += 1;
+        const { path, url, text } = result.value;
+        const index = text.toLowerCase().indexOf(needle);
+        if (index === -1) continue;
+        matches.push({
+          path,
+          sourceUrl: url.href,
+          snippet: snippetAround(text, index, query.length),
+        });
+        if (matches.length >= limit) break;
+      }
     }
 
-    const documents: SearchIndex["documents"] = [];
-    for (const [path, url] of pages) {
-      const text = catalog.texts.get(path);
-      if (text !== undefined) documents.push({ path, text, sourceUrl: url.href });
-    }
     return {
-      documents,
-      scanned: documents.length,
-      partial: catalog.truncated || documents.length < pages.length,
+      matches,
+      scanned,
+      total: catalog.pages.size,
+      partial: catalog.truncated || scanned < catalog.pages.size || budget.aborted,
+      stale: catalog.stale,
     };
   }
 }

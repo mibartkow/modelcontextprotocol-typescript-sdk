@@ -25,20 +25,26 @@ function* localDocuments(): Generator<{ path: string; text: string }> {
 
 export function createDocsServer(): McpServer {
   const sitemap = process.env.DOCS_SITEMAP_URL?.trim();
-  const website = sitemap
-    ? (websiteDocs ??= new WebsiteDocs(sitemap, process.env.DOCS_SITE_PATH?.trim()))
-    : undefined;
   const server = new McpServer(
     {
       name: "docs-mcp",
       version: "1.0.0",
     },
     {
-      instructions: website
+      instructions: sitemap
         ? "Use search_docs for DigiDEV questions. Prefer returned HTTPS sourceUrl matches. Do not confuse DigiDEV APIs with Vitest or other npm packages."
         : "Documentation comes from local Markdown/MDX files under DOCS_ROOT.",
     },
   );
+  registerDocsTools(server);
+  return server;
+}
+
+export function registerDocsTools(server: McpServer): void {
+  const sitemap = process.env.DOCS_SITEMAP_URL?.trim();
+  const website = sitemap
+    ? (websiteDocs ??= new WebsiteDocs(sitemap, process.env.DOCS_SITE_PATH?.trim()))
+    : undefined;
 
   server.registerTool(
     "list_docs",
@@ -198,6 +204,4 @@ export function createDocsServer(): McpServer {
       };
     },
   );
-
-  return server;
 }

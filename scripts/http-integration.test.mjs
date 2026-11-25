@@ -8,13 +8,15 @@ import { setTimeout as delay } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const host = "127.0.0.1";
-const servers = [
+const standalone = [
   {
-    name: "docs",
+    name: "docs-mcp",
+    portVariable: "DOCS_HTTP_PORT",
     env: { DOCS_ROOT: path.join(root, "fixtures", "docs"), DOCS_SITEMAP_URL: "", DOCS_IGNORE_DIRS: "" },
     tool: "list_docs",
     args: { limit: 1 },
@@ -26,19 +28,32 @@ const servers = [
     },
   },
   {
-    name: "jira",
+    name: "jira-mcp",
+    portVariable: "JIRA_HTTP_PORT",
+    upstreamPrefix: "JIRA",
     tool: "jira_get_issue",
     args: { key: "TEST-123" },
     upstreamPath: "/rest/api/2/issue/TEST-123",
     expected: { key: "TEST-123", fields: { summary: "Fixture issue" } },
   },
   {
-    name: "confluence",
+    name: "confluence-mcp",
+    portVariable: "CONFLUENCE_HTTP_PORT",
+    upstreamPrefix: "CONFLUENCE",
     tool: "confluence_get_page",
     args: { pageId: "123" },
     upstreamPath: "/rest/api/content/123?expand=body.storage,version,space",
     expected: { id: "123", title: "Fixture page" },
   },
+];
+const servers = [...standalone, {
+  name: "my-mcp",
+  portVariable: "MY_MCP_HTTP_PORT",
+  tools: standalone,
+}];
+const unifiedTools = [
+  "confluence_get_page", "confluence_search", "jira_get_issue", "jira_search",
+  "list_docs", "read_doc", "search_docs",
 ];
 const uuid = /^[\da-f]{8}-[\da-f]{4}-4[\da-f]{3}-[89ab][\da-f]{3}-[\da-f]{12}$/i;
 const initialize = {
@@ -78,8 +93,7 @@ async function waitFor(predicate, signal, message) {
   assert.fail(message());
 }
 
-function start(t, name, port, env = {}) {
-  const portVariable = `${name.toUpperCase()}_HTTP_PORT`;
+function start(t, { name, portVariable }, port, env = {}) {
   // Emit the signal inside the child for Windows, where kill("SIGTERM") terminates it immediately.
   const bootstrap = `
     import { pathToFileURL } from "node:url";
@@ -93,7 +107,7 @@ function start(t, name, port, env = {}) {
   `;
   const child = spawn(process.execPath, [
     "--import", "tsx", "--input-type=module", "--eval", bootstrap,
-    path.join(root, "packages", `${name}-mcp`, "src", "http.ts"),
+    path.join(root, "packages", name, "src", "http.ts"),
   ], {
     cwd: root,
     env: { ...process.env, ...env, [portVariable]: String(port) },
@@ -113,12 +127,12 @@ function start(t, name, port, env = {}) {
   return { child, lines, records, completion, portVariable };
 }
 
-async function startListening(t, name, env) {
+async function startListening(t, fixture, env) {
   const reservation = createServer();
   const port = await listen(reservation);
   await close(reservation);
   const endpoint = new URL(`http://${host}:${port}/mcp`);
-  const server = start(t, name, port, env);
+  const server = start(t, fixture, port, env);
   await waitFor(() => {
     if (server.child.exitCode !== null || server.child.signalCode !== null) {
       assert.fail(`Server exited before listening:\n${server.lines.join("\n")}`);
@@ -141,39 +155,117 @@ async function openRequest(endpoint) {
   return { req, body };
 }
 
+async function connectStdio(t, name, env) {
+  const client = new Client({ name: "stdio-parity", version: "1.0.0" });
+  t.after(() => client.close());
+  await client.connect(new StdioClientTransport({
+    command: process.execPath,
+    args: ["--import", "tsx", path.join(root, "packages", name, "src", "index.ts")],
+    cwd: root,
+    env,
+    stderr: "pipe",
+  }));
+  return client;
+}
+
 for (const fixture of servers) {
   test(`${fixture.name} Streamable HTTP`, { timeout: 60_000 }, async (t) => {
-    const prefix = fixture.name.toUpperCase();
-    const env = { ...fixture.env };
-    const upstreamCalls = [];
-    if (fixture.upstreamPath) {
+    const tools = fixture.tools ?? [fixture];
+    const env = {};
+    const upstreamCalls = new Map();
+    let failedSource;
+    for (const tool of tools) {
+      Object.assign(env, tool.env);
+      if (!tool.upstreamPath) continue;
+
+      const calls = [];
+      upstreamCalls.set(tool.tool, calls);
       const upstream = createServer((req, res) => {
-        upstreamCalls.push({ path: req.url, authorization: req.headers.authorization });
+        calls.push({ path: req.url, authorization: req.headers.authorization });
+        if (tool.upstreamPrefix === failedSource) {
+          res.writeHead(503).end();
+          return;
+        }
+        if (req.url.startsWith("/rest/api/2/search?") || req.url.startsWith("/rest/api/content/search?")) {
+          const url = new URL(req.url, "http://localhost");
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify(Object.fromEntries(url.searchParams)));
+          return;
+        }
         res.writeHead(200, { "Content-Type": "application/json" });
-        res.end(JSON.stringify(fixture.expected));
+        res.end(JSON.stringify(tool.expected));
       });
-      env[`${prefix}_BASE_URL`] = `http://${host}:${await listen(upstream)}`;
-      env[`${prefix}_PAT`] = "fixture-upstream-token";
+      env[`${tool.upstreamPrefix}_BASE_URL`] = `http://${host}:${await listen(upstream)}`;
+      env[`${tool.upstreamPrefix}_PAT`] = "fixture-upstream-token";
       t.after(() => close(upstream));
     }
 
-    const { child, lines, records, completion, endpoint, port } = await startListening(t, fixture.name, env);
+    const { child, lines, records, completion, endpoint, port } = await startListening(t, fixture, env);
 
     const transport = new StreamableHTTPClientTransport(endpoint);
     const client = new Client({ name: "http-integration", version: "1.0.0" });
     t.after(() => client.close());
     await client.connect(transport);
-    assert.equal(client.getServerVersion().name, `${fixture.name}-mcp`);
+    assert.equal(client.getServerVersion().name, fixture.name);
     assert.equal(transport.sessionId, undefined);
-    assert.ok((await client.listTools()).tools.some((tool) => tool.name === fixture.tool));
-    const result = await client.callTool({ name: fixture.tool, arguments: fixture.args });
-    assert.ok(!result.isError);
-    assert.deepEqual(JSON.parse(result.content[0].text), fixture.expected);
-    if (fixture.upstreamPath) {
-      assert.deepEqual(upstreamCalls, [{
-        path: fixture.upstreamPath,
-        authorization: "Bearer fixture-upstream-token",
-      }]);
+    const listed = new Set((await client.listTools()).tools.map((tool) => tool.name));
+    for (const tool of tools) {
+      assert.ok(listed.has(tool.tool));
+      const result = await client.callTool({ name: tool.tool, arguments: tool.args });
+      assert.ok(!result.isError);
+      assert.deepEqual(JSON.parse(result.content[0].text), tool.expected);
+      if (tool.upstreamPath) {
+        assert.deepEqual(upstreamCalls.get(tool.tool), [{
+          path: tool.upstreamPath,
+          authorization: "Bearer fixture-upstream-token",
+        }]);
+      }
+    }
+
+    if (fixture.tools) {
+      const stdio = await connectStdio(t, fixture.name, env);
+      const legacy = Object.fromEntries(await Promise.all(standalone.map(async ({ name }) =>
+        [name, await connectStdio(t, name, env)]
+      )));
+      const sortTools = (entries) => [...entries].sort((a, b) => a.name.localeCompare(b.name));
+      const catalog = sortTools((await client.listTools()).tools);
+      assert.deepEqual(catalog.map(({ name }) => name), unifiedTools);
+      assert.deepEqual(sortTools((await stdio.listTools()).tools), catalog);
+      const standaloneCatalogs = await Promise.all(Object.values(legacy).map(async (server) =>
+        (await server.listTools()).tools
+      ));
+      assert.deepEqual(sortTools(standaloneCatalogs.flat()), catalog);
+
+      const calls = [
+        ...tools.map(({ name, tool, args }) => [name, tool, args]),
+        ["docs-mcp", "search_docs", { query: "onboarding" }],
+        ["docs-mcp", "read_doc", { path: "guides/onboarding.md", offset: 2, limit: 8 }],
+        ["jira-mcp", "jira_search", { jql: "project = TEST", startAt: 2 },
+          { jql: "project = TEST", startAt: "2", maxResults: "10", fields: "summary,status,issuetype,updated" }],
+        ["confluence-mcp", "confluence_search", { cql: "type = page", start: 1 },
+          { cql: "type = page", start: "1", limit: "10" }],
+      ];
+      for (const [source, name, args, expected] of calls) {
+        const call = { name, arguments: args };
+        const baseline = await legacy[source].callTool(call);
+        assert.ok(!baseline.isError, JSON.stringify(baseline));
+        if (expected) assert.deepEqual(JSON.parse(baseline.content[0].text), expected);
+        assert.deepEqual(await client.callTool(call), baseline);
+        assert.deepEqual(await stdio.callTool(call), baseline);
+      }
+
+      const issue = { name: "jira_get_issue", arguments: { key: "TEST-123" } };
+      const page = { name: "confluence_get_page", arguments: { pageId: "123" } };
+      for (const [source, unavailable, available] of [["JIRA", issue, page], ["CONFLUENCE", page, issue]]) {
+        failedSource = source;
+        for (const server of [client, stdio]) {
+          const result = await server.callTool(unavailable);
+          assert.equal(result.isError, true);
+          assert.match(result.content[0].text, /HTTP 503/);
+          assert.ok(!(await server.callTool(available)).isError);
+          assert.ok(!(await server.callTool({ name: "list_docs" })).isError);
+        }
+      }
     }
 
     const response = await fetch(`${endpoint.href}?private=fixture-query`, {
@@ -283,7 +375,7 @@ for (const fixture of servers) {
       assert.deepEqual(Object.keys(record).sort(), [
         "aborted", "durationMs", "event", "method", "requestId", "server", "status",
       ]);
-      assert.equal(record.server, `${fixture.name}-mcp`);
+      assert.equal(record.server, fixture.name);
       assert.match(record.requestId, uuid);
       assert.ok(Number.isInteger(record.durationMs) && record.durationMs >= 0);
     }
@@ -291,14 +383,14 @@ for (const fixture of servers) {
   });
 
   test(`${fixture.name} rejects invalid HTTP port configuration`, { timeout: 45_000 }, async (t) => {
-    const { completion, lines, portVariable } = start(t, fixture.name, "0");
+    const { completion, lines, portVariable } = start(t, fixture, "0");
     assert.deepEqual(await completion, [1, null]);
     assert.ok(lines.some((line) => line.includes(`${portVariable} must be a decimal port between 1 and 65535`)));
   });
 }
 
 test("docs factory failure is correlated without raw configuration in logs", { timeout: 45_000 }, async (t) => {
-  const { lines, records, endpoint } = await startListening(t, "docs", {
+  const { lines, records, endpoint } = await startListening(t, standalone[0], {
     DOCS_SITEMAP_URL: "fixture-invalid-sitemap",
   });
   const response = await fetch(endpoint, {
@@ -326,4 +418,53 @@ test("docs factory failure is correlated without raw configuration in logs", { t
     phase: "factory",
   });
   assert.doesNotMatch(lines.join("\n"), /fixture-invalid-sitemap/);
+});
+
+test("my-mcp serves Docusaurus with Atlassian unconfigured", { timeout: 60_000 }, async (t) => {
+  const site = createServer((req, res) => {
+    if (req.url === "/docs/sitemap.xml") {
+      res.writeHead(200, { "Content-Type": "application/xml" });
+      res.end(`<urlset><url><loc>${origin}/docs/intro</loc></url></urlset>`);
+    } else if (req.url === "/docs/intro") {
+      res.writeHead(200, { "Content-Type": "text/html" });
+      res.end('<main><article><div class="theme-doc-markdown"><h1>Fixture</h1><p>Website onboarding</p></div></article></main>');
+    } else {
+      res.writeHead(404).end();
+    }
+  });
+  const origin = `http://${host}:${await listen(site)}`;
+  t.after(() => close(site));
+  const fixture = { name: "my-mcp", portVariable: "MY_MCP_HTTP_PORT" };
+  const env = {
+    ...standalone[0].env,
+    DOCS_SITEMAP_URL: `${origin}/docs/sitemap.xml`,
+    DOCS_SITE_PATH: "/docs",
+    JIRA_BASE_URL: "",
+    CONFLUENCE_BASE_URL: "",
+  };
+  const { endpoint } = await startListening(t, fixture, env);
+  const http = new Client({ name: "http-website-fixture", version: "1.0.0" });
+  t.after(() => http.close());
+  await http.connect(new StreamableHTTPClientTransport(endpoint));
+  const stdio = await connectStdio(t, fixture.name, env);
+  const sourceUrl = `${origin}/docs/intro`;
+  for (const client of [http, stdio]) {
+    const { tools } = await client.listTools();
+    assert.deepEqual(tools.map(({ name }) => name).sort(), unifiedTools);
+    for (const [name, args] of [
+      ["jira_search", { jql: "project = TEST" }],
+      ["confluence_search", { cql: "type = page" }],
+    ]) {
+      const error = await client.callTool({ name, arguments: args });
+      assert.equal(error.isError, true);
+      assert.match(error.content[0].text, /Missing (Jira|Confluence) config/);
+    }
+    const listing = await client.callTool({ name: "list_docs" });
+    assert.deepEqual(JSON.parse(listing.content[0].text).documents, [{ path: "docs/intro", sourceUrl }]);
+    const search = await client.callTool({ name: "search_docs", arguments: { query: "onboarding" } });
+    assert.equal(JSON.parse(search.content[0].text).matches[0].sourceUrl, sourceUrl);
+    const read = await client.callTool({ name: "read_doc", arguments: { path: "docs/intro" } });
+    assert.equal(read.structuredContent.sourceUrl, sourceUrl);
+    assert.match(read.content[0].text, /Website onboarding/);
+  }
 });

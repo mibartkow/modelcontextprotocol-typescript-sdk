@@ -10,7 +10,11 @@ export function createJiraServer(): McpServer {
     name: "jira-mcp",
     version: "1.0.0",
   });
+  registerJiraTools(server);
+  return server;
+}
 
+export function registerJiraTools(server: McpServer): void {
   server.registerTool(
     "jira_search",
     {
@@ -94,6 +98,4 @@ export function createJiraServer(): McpServer {
       }
     },
   );
-
-  return server;
 }

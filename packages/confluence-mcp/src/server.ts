@@ -7,7 +7,11 @@ export function createConfluenceServer(): McpServer {
     name: "confluence-mcp",
     version: "1.0.0",
   });
+  registerConfluenceTools(server);
+  return server;
+}
 
+export function registerConfluenceTools(server: McpServer): void {
   server.registerTool(
     "confluence_search",
     {
@@ -91,6 +95,4 @@ export function createConfluenceServer(): McpServer {
       }
     },
   );
-
-  return server;
 }

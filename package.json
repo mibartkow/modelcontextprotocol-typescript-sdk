@@ -2,12 +2,14 @@
   "name": "my-mcp",
   "version": "1.0.0",
   "private": true,
-  "description": "Monorepo with separate MCP servers for Markdown docs, Jira, and Confluence",
+  "description": "Unified and standalone MCP servers for Markdown docs, Jira, and Confluence",
   "type": "module",
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
+    "mcp": "npm run start -w @my-mcp/my-mcp",
+    "mcp:http": "npm run start:http -w @my-mcp/my-mcp",
     "docs": "npm run start -w @my-mcp/docs-mcp",
     "docs:http": "npm run start:http -w @my-mcp/docs-mcp",
     "jira": "npm run start -w @my-mcp/jira-mcp",
@@ -21,7 +23,8 @@
     "smoke:docs": "node scripts/smoke-docs.mjs",
     "smoke:docs:website": "node scripts/smoke-docs-website.mjs",
     "smoke:jira": "node scripts/smoke-jira-list.mjs",
-    "test:http": "node --test scripts/http-integration.test.mjs"
+    "test:http": "node --test scripts/http-integration.test.mjs",
+    "test:stdio": "node --test scripts/stdio-integration.test.mjs"
   },
   "keywords": [
     "mcp",

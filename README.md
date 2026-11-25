@@ -1,6 +1,6 @@
 # MCP servers for Markdown, Jira, and Confluence
 
-This TypeScript monorepo provides three independent, read-only [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) servers. Connect them to an MCP client to retrieve local documentation or look up content in Jira and Confluence Server/Data Center.
+The read-only [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server `my-mcp` exposes Docs, Jira, and Confluence through a single connection. Each tool group is also available as a standalone server.
 
 | Server | Data source | Tools |
 | --- | --- | --- |
@@ -14,10 +14,10 @@ Use Node.js 24 LTS (at least 24.22.1 on the Node 24 release line for the current
 
 ```sh
 npm ci
-npx @modelcontextprotocol/inspector --cli --method tools/list -- node --import tsx packages/docs-mcp/src/index.ts
+npx @modelcontextprotocol/inspector --cli --method tools/list -- node --import tsx packages/my-mcp/src/index.ts
 ```
 
-The repository includes sample documents, so this works without Atlassian credentials. To try a tool interactively, start `npx @modelcontextprotocol/inspector` and use the Docs stdio settings below.
+Run `npm run mcp` to start the combined server over stdio. The repository includes sample documents, so you can list all tools and call the Docs tools without Atlassian credentials. Jira and Confluence each require their own credentials when called. To try a tool interactively, start `npx @modelcontextprotocol/inspector` and use the my-mcp stdio settings below.
 
 | Tool | Example arguments |
 | --- | --- |
@@ -59,14 +59,14 @@ Example Atlassian calls after configuration:
 
 ### Read a Docusaurus website locally
 
-In the `.env` at the root of the checkout that runs `docs-mcp`, set the sitemap URL to your website:
+In the checkout's root `.env`, set the sitemap URL to your website:
 
 ```dotenv
 DOCS_SITEMAP_URL=https://docs.example/handbuch/sitemap.xml
 DOCS_SITE_PATH=/handbuch/docs
 ```
 
-Set `DOCS_SITE_PATH` to the common URL path of the documentation pages you want to expose. Omit it to use the sitemap directory as the path prefix. The machine running `docs-mcp` needs network access to the website. Website mode uses the sitemap and rendered HTML, and takes precedence over `DOCS_ROOT`. The Docs server reads its checkout's `.env` even when an MCP client starts it from another project. A non-empty `DOCS_SITEMAP_URL` enables website mode. Restart the server after editing the file and check the startup log for `source: website`.
+Set `DOCS_SITE_PATH` to the common URL path of the documentation pages you want to expose. Omit it to use the sitemap directory as the path prefix. The machine running the server needs network access to the website. Website mode uses the sitemap and rendered HTML, and takes precedence over `DOCS_ROOT`. The combined server and the standalone Docs server read their checkout's `.env` even when an MCP client starts them from another project. A non-empty `DOCS_SITEMAP_URL` enables website mode. Restart the server after editing the file and check the startup log for `source: website`.
 
 Use the Inspector in the quick start and call `list_docs` first. Pass a returned `documents[].path`, for example `handbuch/docs/getting-started`, to `read_doc`. In website mode, each listed document and each `search_docs` match includes its original page URL in `sourceUrl`. `search_docs` matches text from the article body. Every `read_doc` excerpt starts with a `Source:` line in the tool text. Clients can also read the URL from the structured metadata. The pagination offset counts article text only.
 
@@ -87,6 +87,7 @@ Set the client's working directory to the repository root. Use `node` as the com
 
 | Server | Arguments |
 | --- | --- |
+| my-mcp | `--import tsx packages/my-mcp/src/index.ts` |
 | Docs | `--import tsx packages/docs-mcp/src/index.ts` |
 | Jira | `--import tsx packages/jira-mcp/src/index.ts` |
 | Confluence | `--import tsx packages/confluence-mcp/src/index.ts` |
@@ -97,11 +98,14 @@ The server logs to stderr so that stdout can carry MCP messages.
 
 | Server | Start command | Default endpoint | Port override |
 | --- | --- | --- | --- |
+| my-mcp | `npm run mcp:http` | `http://127.0.0.1:3100/mcp` | `MY_MCP_HTTP_PORT` |
 | Docs | `npm run docs:http` | `http://127.0.0.1:3101/mcp` | `DOCS_HTTP_PORT` |
 | Jira | `npm run jira:http` | `http://127.0.0.1:3102/mcp` | `JIRA_HTTP_PORT` |
 | Confluence | `npm run confluence:http` | `http://127.0.0.1:3103/mcp` | `CONFLUENCE_HTTP_PORT` |
 
 The servers accept stateless MCP requests via `POST /mcp`. In Inspector, select **Streamable HTTP**, enter the endpoint, and connect.
+
+To migrate an existing client, replace its standalone connections with one my-mcp connection and refresh its tool list. The tool names and arguments are the same. If the client qualifies tool names with the connection name, update those references to use the new connection. Keep the previous connection settings for a rollback.
 
 Use HTTP in a trusted local environment. The servers bind to `127.0.0.1` and validate supplied `Origin` headers. Only origins matching the endpoint port on `127.0.0.1` or `localhost` are accepted. HTTP has no client authentication. Keep the ports private. Anyone who can call the Atlassian tools uses the upstream permissions of the configured server account.
 
@@ -115,6 +119,7 @@ npm run smoke:docs
 npm run smoke:docs:website
 npm run smoke:jira
 npm run test:http
+npm run test:stdio
 ```
 
-The Jira smoke check verifies stdio startup and tool listing without calling Jira. The Docs smoke checks exercise listing, searching, and reading local and website fixtures. The HTTP integration suite starts all three servers and uses local Atlassian API fixtures.
+The Jira smoke check verifies stdio startup and tool listing without calling Jira. The Docs smoke checks exercise listing, searching, and reading local and website fixtures. The HTTP integration suite starts the combined server and all three standalone servers with local Atlassian API fixtures. The stdio integration test verifies the combined server and its behavior without Atlassian credentials.

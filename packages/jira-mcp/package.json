@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
+    "@my-mcp/mcp-http": "1.0.0",
     "zod": "4.6.7"
   }
 }

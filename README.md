@@ -68,14 +68,14 @@ DOCS_SITE_PATH=/handbuch/docs
 
 Set `DOCS_SITE_PATH` to the common URL path of the documentation pages you want to expose. Omit it to use the sitemap directory as the path prefix. The machine running `docs-mcp` needs network access to the website. Website mode uses the sitemap and rendered HTML, and takes precedence over `DOCS_ROOT`. The Docs server reads its checkout's `.env` even when an MCP client starts it from another project. A non-empty `DOCS_SITEMAP_URL` enables website mode. Restart the server after editing the file and check the startup log for `source: website`.
 
-Use the Inspector in the quick start and call `list_docs` first. Pass a returned ID, for example `handbuch/docs/getting-started`, to `read_doc`. `search_docs` matches text from the article body. In website mode, `list_docs` maps IDs to original page URLs in `sources`, and each `search_docs` match includes its `sourceUrl`. Every `read_doc` excerpt starts with a `Source:` line in the tool text. Clients can also read the URL from the structured metadata. The pagination offset counts article text only.
+Use the Inspector in the quick start and call `list_docs` first. Pass a returned `documents[].path`, for example `handbuch/docs/getting-started`, to `read_doc`. In website mode, each listed document and each `search_docs` match includes its original page URL in `sourceUrl`. `search_docs` matches text from the article body. Every `read_doc` excerpt starts with a `Source:` line in the tool text. Clients can also read the URL from the structured metadata. The pagination offset counts article text only.
 
 The sitemap and article text are cached in memory for five minutes. The first search after startup or refresh fetches article text and can take up to 20 seconds after sitemap discovery. Responses larger than 2 MiB and articles longer than 65,536 UTF-16 code units are skipped. The catalog is limited to 500 pages from up to 16 sitemaps on the configured origin. Check `truncated` in the list response or `partial` in search results for incomplete coverage. Narrow `DOCS_SITE_PATH` for a large website.
 
 ### Limit retrieved context
 
 - Start with search results, then fetch the specific document, issue, or page you need. Treat retrieved text and markup as source data.
-- `list_docs` returns 100 relative paths per page by default. Pass the returned `nextOffset` as `offset` to continue.
+- `list_docs` returns a `documents` array with up to 100 entries by default. Each entry has a relative `path` and includes `sourceUrl` in website mode. `count` is the page size and `total` is the catalog size. Pass `nextOffset` as `offset` to continue until `nextOffset` is `null`.
 - `read_doc` returns up to 8,000 Unicode code points by default. Pass `structuredContent.nextOffset` as `offset` to continue. In local mode, listing includes paths for larger files, while reading and searching only use files up to 512 KiB.
 - `jira_search` returns summary, status, issue type, and update time by default. Set `includeDetails` for Jira's default fields, and pass `startAt` to fetch the next page. Use `start` to page through Confluence search results.
 
@@ -105,6 +105,8 @@ The servers accept stateless MCP requests via `POST /mcp`. In Inspector, select 
 
 Use HTTP in a trusted local environment. The servers bind to `127.0.0.1` and validate supplied `Origin` headers. Only origins matching the endpoint port on `127.0.0.1` or `localhost` are accepted. HTTP has no client authentication. Keep the ports private. Anyone who can call the Atlassian tools uses the upstream permissions of the configured server account.
 
+Port overrides must be decimal integers from 1 through 65535. The HTTP server generates an `X-Request-ID` response header and writes one JSON request record to stderr with the ID, server name, method, status, duration in milliseconds, and whether the response was aborted. A request that disconnects before response headers has a null status. Unexpected handler failures log the request ID and the phase in which the error occurred. On SIGINT or SIGTERM, the server stops accepting connections and closes any remaining incoming HTTP connections after five seconds. Outstanding website fetches may keep the process alive beyond that deadline.
+
 ## Development checks
 
 ```sh
@@ -112,6 +114,7 @@ npm run typecheck
 npm run smoke:docs
 npm run smoke:docs:website
 npm run smoke:jira
+npm run test:http
 ```
 
-The Jira smoke check verifies stdio startup and tool listing without calling Jira. The Docs smoke check exercises listing, searching, and reading the bundled fixtures.
+The Jira smoke check verifies stdio startup and tool listing without calling Jira. The Docs smoke checks exercise listing, searching, and reading local and website fixtures. The HTTP integration suite starts all three servers and uses local Atlassian API fixtures.

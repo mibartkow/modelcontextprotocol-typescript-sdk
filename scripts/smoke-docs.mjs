@@ -28,19 +28,30 @@ const listed = await client.callTool({ name: "list_docs", arguments: {} });
 const listText = listed.content?.[0]?.text ?? "";
 const listJson = JSON.parse(listText);
 
-if (!listJson.count || listJson.count < 1) {
-  throw new Error(`Expected Markdown docs, got count=${listJson.count}`);
-}
-if (listJson.files.some((f) => String(f).includes("node_modules/"))) {
-  throw new Error("list_docs leaked node_modules paths");
-}
-console.log("list_docs count:", listJson.count);
-console.log("list_docs sample:", listJson.files.slice(0, 5));
+assert.deepEqual(listJson.documents, [
+  { path: "architecture.md" },
+  { path: "getting-started.md" },
+  { path: "guides/onboarding.md" },
+]);
+assert.equal(listJson.count, 3);
+assert.equal(listJson.total, 3);
+assert.equal(listJson.nextOffset, null);
 assert.equal("root" in listJson, false);
 const firstPage = await client.callTool({ name: "list_docs", arguments: { limit: 1 } });
 const page = JSON.parse(firstPage.content[0].text);
-assert.deepEqual(page.files, listJson.files.slice(0, 1));
+assert.deepEqual(page.documents, listJson.documents.slice(0, 1));
+assert.equal(page.count, 1);
+assert.equal(page.total, listJson.total);
 assert.equal(page.nextOffset, 1);
+const nextPage = await client.callTool({
+  name: "list_docs",
+  arguments: { offset: page.nextOffset, limit: 2 },
+});
+const continuation = JSON.parse(nextPage.content[0].text);
+assert.deepEqual(continuation.documents, listJson.documents.slice(1));
+assert.equal(continuation.count, 2);
+assert.equal(continuation.total, listJson.total);
+assert.equal(continuation.nextOffset, null);
 
 const searched = await client.callTool({
   name: "search_docs",
@@ -53,7 +64,7 @@ if (!searchJson.count || searchJson.count < 1) {
 }
 console.log("search_docs:", JSON.stringify(searchJson, null, 2));
 
-const samplePath = listJson.files.find((f) => f.endsWith("intro.md")) ?? listJson.files[0];
+const samplePath = continuation.documents[1].path;
 const read = await client.callTool({
   name: "read_doc",
   arguments: { path: samplePath },

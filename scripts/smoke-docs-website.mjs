@@ -56,7 +56,7 @@ try {
     command: process.execPath,
     args: [
       "--import",
-      path.join(root, "node_modules/tsx/dist/loader.mjs"),
+      import.meta.resolve("tsx"),
       path.join(root, "packages/docs-mcp/src/index.ts"),
     ],
     cwd,
@@ -70,11 +70,20 @@ try {
   const call = (name, args) => client.callTool({ name, arguments: args });
   const list = JSON.parse((await call("list_docs", { limit: 1 })).content[0].text);
   const sourceUrl = `${origin}/handbuch/docs/intro`;
-  assert.deepEqual(list.files, ["handbuch/docs/intro"]);
-  assert.deepEqual(list.sources, { "handbuch/docs/intro": sourceUrl });
+  const [document] = list.documents;
+  assert.deepEqual(list.documents, [{ path: "handbuch/docs/intro", sourceUrl }]);
+  assert.equal(list.count, 1);
   assert.equal(list.nextOffset, 1);
   assert.equal(list.total, 2);
   assert.equal(list.truncated, false);
+  const nextPage = JSON.parse((await call("list_docs", { offset: list.nextOffset, limit: 1 })).content[0].text);
+  assert.deepEqual(nextPage.documents, [{
+    path: "handbuch/docs/unavailable",
+    sourceUrl: `${origin}/handbuch/docs/unavailable`,
+  }]);
+  assert.equal(nextPage.count, 1);
+  assert.equal(nextPage.total, list.total);
+  assert.equal(nextPage.nextOffset, null);
   assert.deepEqual(requests, ["/handbuch/sitemap.xml", "/docs-sitemap.xml"]);
 
   const search = JSON.parse((await call("search_docs", { query: "onboarding" })).content[0].text);
@@ -84,11 +93,11 @@ try {
   assert.equal(search.matches[0].sourceUrl, sourceUrl);
   assert.doesNotMatch(search.matches[0].snippet, /navigation only|footer only/);
 
-  const read = await call("read_doc", { path: list.files[0], limit: 8 });
+  const read = await call("read_doc", { path: document.path, limit: 8 });
   assert.equal(read.content[0].text, `Source: ${sourceUrl}\n\nHandbuch`);
   assert.equal(read.structuredContent.nextOffset, 8);
   assert.equal(read.structuredContent.sourceUrl, sourceUrl);
-  const continuation = await call("read_doc", { path: list.files[0], offset: read.structuredContent.nextOffset });
+  const continuation = await call("read_doc", { path: document.path, offset: read.structuredContent.nextOffset });
   assert.equal(continuation.content[0].text, `Source: ${sourceUrl}\n\n\n\nOnboarding für 👋 Teams.`);
   assert.equal(continuation.structuredContent.nextOffset, null);
   assert.equal((await call("read_doc", { path: search.matches[0].sourceUrl })).isError, true);

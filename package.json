@@ -20,7 +20,8 @@
     "typecheck": "npm run typecheck --workspaces --if-present",
     "smoke:docs": "node scripts/smoke-docs.mjs",
     "smoke:docs:website": "node scripts/smoke-docs-website.mjs",
-    "smoke:jira": "node scripts/smoke-jira-list.mjs"
+    "smoke:jira": "node scripts/smoke-jira-list.mjs",
+    "test:http": "node --test scripts/http-integration.test.mjs"
   },
   "keywords": [
     "mcp",
